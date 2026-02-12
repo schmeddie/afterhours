@@ -135,7 +135,13 @@ def _parse_interest(member_id: int, raw: dict[str, Any]) -> dict[str, Any]:
 async def fetch_interests(member_id: int) -> list[dict[str, Any]]:
     """Fetch all registered interests for a single member."""
     async with httpx.AsyncClient() as client:
-        data = await _get_json(client, f"{BASE_URL}/Members/{member_id}/Interests")
+        try:
+            data = await _get_json(client, f"{BASE_URL}/Members/{member_id}/Interests")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.debug("No interests endpoint for member %d (404)", member_id)
+                return []
+            raise
         interests: list[dict[str, Any]] = []
         for category in data.get("value", []):
             for entry in category.get("interests", []):
