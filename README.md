@@ -45,7 +45,11 @@ Copy-Item .env.example .env
 # macOS/Linux: cp .env.example .env
 # Then edit .env with your API keys and Neo4j credentials
 
-# 5. Initialise the DuckDB schema
+# 5. Set PYTHONPATH so Python can find the afterhours package
+$env:PYTHONPATH = "src"
+# macOS/Linux: export PYTHONPATH=src
+
+# 6. Initialise the DuckDB schema
 python -c @"
 from afterhours.config.database import get_duckdb_connection
 from pathlib import Path
@@ -55,11 +59,11 @@ conn.close()
 print('DuckDB schema created.')
 "@
 
-# 6. Initialise Neo4j constraints (requires a running Neo4j instance)
+# 7. Initialise Neo4j constraints (requires a running Neo4j instance)
 Get-Content schemas\neo4j\001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
 # macOS/Linux: cat schemas/neo4j/001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
 
-# 7. Start the API server
+# 8. Start the API server
 uvicorn afterhours.api.app:app --reload --app-dir src
 ```
 
