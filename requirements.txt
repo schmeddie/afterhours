@@ -1,0 +1,48 @@
+# After Hours - UK Political Transparency Platform
+# Core Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Database - Relational/Analytical
+duckdb==1.2.1
+
+# Database - Graph
+neo4j==5.27.0
+
+# Entity Resolution
+splink==4.0.6
+
+# AI/LLM - Gemini
+google-genai==1.7.0
+
+# PDF Processing
+pymupdf==1.25.3
+Pillow==11.1.0
+
+# HTTP / API Clients
+httpx==0.28.1
+aiohttp==3.11.12
+
+# Data Processing
+pandas==2.2.3
+pyarrow==18.1.0
+
+# Geospatial
+geopy==2.4.1
+
+# Validation & Serialization
+jsonschema==4.23.0
+
+# Configuration & Environment
+python-dotenv==1.0.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.2
+pytest-cov==6.0.0
+
+# Dev Tools
+ruff==0.9.4
+mypy==1.14.1
