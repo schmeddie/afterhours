@@ -60,8 +60,23 @@ print('DuckDB schema created.')
 "@
 
 # 7. Initialise Neo4j constraints (requires a running Neo4j instance)
-Get-Content schemas\neo4j\001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
-# macOS/Linux: cat schemas/neo4j/001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
+#    Option A – paste the contents of schemas\neo4j\001_create_constraints.cypher
+#               into the Neo4j Browser query box (http://localhost:7474) and run them.
+#    Option B – if cypher-shell is on your PATH:
+#      Get-Content schemas\neo4j\001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
+#    Option C – use the Python driver (no extra install needed):
+python -c @"
+from neo4j import GraphDatabase
+from pathlib import Path
+driver = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', '<password>'))
+stmts = [s.strip() for s in Path('schemas/neo4j/001_create_constraints.cypher').read_text().split(';') if s.strip() and not s.strip().startswith('//')]
+with driver.session() as session:
+    for stmt in stmts:
+        session.run(stmt)
+        print(f'OK: {stmt[:60]}...')
+driver.close()
+print('Neo4j constraints created.')
+"@
 
 # 8. Start the API server
 uvicorn afterhours.api.app:app --reload --app-dir src
