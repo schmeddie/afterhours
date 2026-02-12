@@ -50,36 +50,13 @@ $env:PYTHONPATH = "src"
 # macOS/Linux: export PYTHONPATH=src
 
 # 6. Initialise the DuckDB schema
-python -c @"
-from afterhours.config.database import get_duckdb_connection
-from pathlib import Path
-conn = get_duckdb_connection()
-conn.execute(Path('schemas/duckdb/001_create_tables.sql').read_text())
-conn.close()
-print('DuckDB schema created.')
-"@
+python manage.py init-db
 
 # 7. Initialise Neo4j constraints (requires a running Neo4j instance)
-#    Option A – paste the contents of schemas\neo4j\001_create_constraints.cypher
-#               into the Neo4j Browser query box (http://localhost:7474) and run them.
-#    Option B – if cypher-shell is on your PATH:
-#      Get-Content schemas\neo4j\001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
-#    Option C – use the Python driver (no extra install needed):
-python -c @"
-from neo4j import GraphDatabase
-from pathlib import Path
-driver = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', '<password>'))
-stmts = [s.strip() for s in Path('schemas/neo4j/001_create_constraints.cypher').read_text().split(';') if s.strip() and not s.strip().startswith('//')]
-with driver.session() as session:
-    for stmt in stmts:
-        session.run(stmt)
-        print(f'OK: {stmt[:60]}...')
-driver.close()
-print('Neo4j constraints created.')
-"@
+python manage.py init-neo4j
 
 # 8. Start the API server
-uvicorn afterhours.api.app:app --reload --app-dir src
+python manage.py serve
 ```
 
 The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
@@ -103,60 +80,41 @@ All settings are loaded from environment variables (or a `.env` file). See `.env
 
 ## Usage
 
-The platform has five pipelines that run in sequence. Each can be run independently.
+All pipelines are accessible through `manage.py`. **Stop the API server before running pipelines** (DuckDB only allows one process at a time).
+
+```powershell
+python manage.py <command> [options]
+```
+
+| Command | Description |
+|---|---|
+| `init-db` | Create/reset the DuckDB schema |
+| `init-neo4j` | Create Neo4j constraints and indexes |
+| `ingest-parliament` | Fetch all MPs, Lords, and financial interests |
+| `ingest-company <NUMBER>` | Fetch a company profile and officers |
+| `ingest-procurement <FILE>` | Ingest an OCDS JSON file |
+| `extract-pdf <FILE>` | Extract council data from a PDF via Gemini |
+| `resolve` | Run Splink entity resolution |
+| `sync-graph` | Push approved links to Neo4j |
+| `serve [--host HOST] [--port PORT]` | Start the API server |
 
 ### Step 1 -- Ingest Parliament Data
 
 Pull current MPs, Lords, and their registered financial interests into DuckDB:
 
-```python
-import asyncio
-from afterhours.ingestion.ingest_parliament import (
-    fetch_all_members,
-    fetch_interests,
-    upsert_members,
-    upsert_interests,
-)
-
-async def ingest_parliament():
-    # Fetch all current MPs
-    commons = await fetch_all_members(house=1)
-    lords = await fetch_all_members(house=2)
-    upsert_members(commons + lords)
-
-    # Fetch financial interests for each member
-    for member in commons + lords:
-        interests = await fetch_interests(member["member_id"])
-        upsert_interests(interests)
-
-asyncio.run(ingest_parliament())
+```powershell
+python manage.py ingest-parliament
 ```
 
 ### Step 2 -- Ingest Companies House Data
 
-Pull company profiles and officer lists for companies of interest:
+Pull company profiles and officer lists for companies of interest (requires `COMPANIES_HOUSE_API_KEY` in `.env`):
 
-```python
-import asyncio
-from afterhours.ingestion.ingest_companies_house import (
-    fetch_company_profile,
-    fetch_officers,
-    upsert_companies,
-    upsert_officers,
-)
-
-async def ingest_company(company_number: str):
-    profile = await fetch_company_profile(company_number)
-    upsert_companies([profile])
-
-    officers = await fetch_officers(company_number)
-    upsert_officers(officers)
-
-# Example: ingest a specific company
-asyncio.run(ingest_company("00000006"))
+```powershell
+python manage.py ingest-company 00000006
 ```
 
-To listen for real-time filings via the Streaming API:
+To listen for real-time filings via the Streaming API, use the Python API directly:
 
 ```python
 import asyncio
@@ -173,26 +131,16 @@ asyncio.run(watch_filings())
 
 Parse Open Contracting Data Standard JSON files (e.g. from Find a Tender):
 
-```python
-from pathlib import Path
-from afterhours.ingestion.ingest_procurement import ingest_ocds_file
-
-# Ingest a single OCDS release package
-count = ingest_ocds_file(Path("data/raw/procurement/tender_2025.json"))
-print(f"Inserted {count} contracts")
+```powershell
+python manage.py ingest-procurement data/raw/procurement/tender_2025.json
 ```
 
 ### Step 4 -- Extract Council Meeting Data from PDFs
 
-Process council minutes PDFs through the Gemini 2.0 Flash vision pipeline:
+Process council minutes PDFs through the Gemini 2.0 Flash vision pipeline (requires `GEMINI_API_KEY` in `.env`):
 
-```python
-from pathlib import Path
-from afterhours.extract.extract_council_pdf import process_pdf
-
-# Extract councillor votes and planning decisions
-records = process_pdf(Path("data/raw/council_pdfs/minutes_2025_03.pdf"))
-print(f"Extracted {records} records")
+```powershell
+python manage.py extract-pdf data/raw/council_pdfs/minutes_2025_03.pdf
 ```
 
 The pipeline:
@@ -205,11 +153,8 @@ The pipeline:
 
 Match Parliament members against Companies House officers using Splink:
 
-```python
-from afterhours.intelligence.resolve_entities import run_entity_resolution
-
-links = run_entity_resolution()
-print(f"Produced {links} candidate links")
+```powershell
+python manage.py resolve
 ```
 
 This trains a Fellegi-Sunter model with:
@@ -221,7 +166,7 @@ Results land in the `linkage_table` with a `match_probability` (0.0--1.0) and a 
 
 ### Step 6 -- Human Review
 
-High-risk links must be reviewed before they appear in the graph. Use the API or call the functions directly.
+High-risk links must be reviewed before they appear in the graph. Use the API endpoints (server must be running):
 
 **PowerShell:**
 
@@ -254,26 +199,22 @@ curl -X POST http://localhost:8000/api/v1/compliance/review/LINK_ID \
 
 Push approved links to Neo4j:
 
-```python
-from afterhours.graph.sync import sync_approved_links
-
-sync_approved_links()
+```powershell
+python manage.py sync-graph
 ```
 
 This creates/updates `Person`, `Company`, and `Constituency` nodes with `MP_FOR` and `DIRECTOR_OF` relationships. Only links with status `approved` or `auto_approved` are synced.
 
 ### Step 8 -- Query the Graph API
 
-**PowerShell:**
+Start the server and query (server must be running):
 
 ```powershell
-# Search for a person by name
+python manage.py serve
+
+# In another terminal:
 Invoke-RestMethod "http://localhost:8000/api/v1/graph/search?q=Smith&limit=10"
-
-# Get a person's full graph (directorships, companies)
 Invoke-RestMethod http://localhost:8000/api/v1/graph/persons/parliament-4321
-
-# List high-risk persons above a given threshold
 Invoke-RestMethod "http://localhost:8000/api/v1/graph/high-risk?threshold=75&limit=20"
 ```
 
