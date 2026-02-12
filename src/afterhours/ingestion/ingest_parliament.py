@@ -2,7 +2,7 @@
 
 Parliament APIs used:
   - Members API v1: https://members-api.parliament.uk/
-  - Interests API:  https://members-api.parliament.uk/ (interests endpoint)
+  - Interests API v1: https://interests-api.parliament.uk/
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BASE_URL = settings.parliament_api_base_url
+INTERESTS_BASE_URL = "https://interests-api.parliament.uk/api/v1"
 _DEFAULT_TIMEOUT = 30.0
 _PAGE_SIZE = 20
 
@@ -117,36 +118,70 @@ async def fetch_all_members(house: int = 1) -> list[dict[str, Any]]:
 
 
 def _parse_interest(member_id: int, raw: dict[str, Any]) -> dict[str, Any]:
-    """Parse a single interest entry from the Register of Financial Interests."""
+    """Parse a single interest entry from the Register of Interests API v1."""
     return {
         "interest_id": f"{member_id}-{raw.get('id', '')}",
         "member_id": member_id,
-        "category": raw.get("category", {}).get("name", ""),
-        "description": raw.get("interest", ""),
-        "date_registered": (raw.get("createdWhen") or "")[:10] or None,
-        "date_updated": (raw.get("lastAmendedWhen") or "")[:10] or None,
-        "extracted_company_name": None,
+        "category": raw.get("category", ""),
+        "description": raw.get("summary", ""),
+        "date_registered": (raw.get("registered") or "")[:10] or None,
+        "date_updated": (raw.get("updated") or "")[:10] or None,
+        "extracted_company_name": raw.get("donorCompanyName"),
         "extracted_role": None,
-        "extracted_amount": None,
+        "extracted_amount": _parse_amount(raw.get("value")),
         "fetched_at": datetime.utcnow().isoformat(),
     }
 
 
-async def fetch_interests(member_id: int) -> list[dict[str, Any]]:
-    """Fetch all registered interests for a single member."""
-    async with httpx.AsyncClient() as client:
+def _parse_amount(value: Any) -> float | None:
+    """Try to extract a numeric amount from an interest value field."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").replace("£", "").strip()
         try:
-            data = await _get_json(client, f"{BASE_URL}/Members/{member_id}/Interests")
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                logger.debug("No interests endpoint for member %d (404)", member_id)
-                return []
-            raise
-        interests: list[dict[str, Any]] = []
-        for category in data.get("value", []):
-            for entry in category.get("interests", []):
-                interests.append(_parse_interest(member_id, entry))
-        return interests
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+async def fetch_interests(member_id: int) -> list[dict[str, Any]]:
+    """Fetch all registered interests for a single member.
+
+    Uses the dedicated Register of Interests API v1 at
+    interests-api.parliament.uk rather than the Members API.
+    """
+    interests: list[dict[str, Any]] = []
+    skip = 0
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                data = await _get_json(
+                    client,
+                    f"{INTERESTS_BASE_URL}/Interests",
+                    params={"MemberId": member_id, "Skip": skip, "Take": _PAGE_SIZE},
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    logger.debug("No interests found for member %d (404)", member_id)
+                    return []
+                raise
+
+            items = data.get("items", [])
+            if not items:
+                break
+            for item in items:
+                interests.append(_parse_interest(member_id, item))
+            total = data.get("totalResults", 0)
+            skip += _PAGE_SIZE
+            if skip >= total:
+                break
+
+    return interests
 
 
 # ---------------------------------------------------------------------------
