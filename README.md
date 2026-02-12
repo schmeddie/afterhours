@@ -6,11 +6,15 @@ Built on a feasibility study for linking the Register of Members' Financial Inte
 
 ## Prerequisites
 
+> **Windows** is the primary development platform. All instructions below use PowerShell.
+> macOS/Linux alternatives are noted where commands differ.
+
 | Dependency | Version | Purpose |
 |---|---|---|
-| Python | 3.11+ | Runtime |
-| Neo4j | 5.x | Graph database for the Political Graph |
+| Python | 3.11+ | Runtime ([python.org/downloads](https://www.python.org/downloads/) -- tick "Add to PATH" during install) |
+| Neo4j | 5.x | Graph database for the Political Graph ([neo4j.com/download](https://neo4j.com/download/)) |
 | DuckDB | (bundled) | Embedded analytical database, no install needed |
+| Git | latest | Source control ([git-scm.com](https://git-scm.com/)) |
 | API keys | See below | Companies House, Google Gemini |
 
 **API keys you will need:**
@@ -19,35 +23,41 @@ Built on a feasibility study for linking the Register of Members' Financial Inte
 - **Google Gemini** -- get an API key from [aistudio.google.com](https://aistudio.google.com/).
 - **Parliament API** -- no key required; the Members API is open.
 
-## Quick Start
+## Quick Start (Windows)
 
-```bash
+All commands use **PowerShell**. A macOS/Linux alternative is noted where it differs.
+
+```powershell
 # 1. Clone and enter the repo
-git clone <repo-url> && cd afterhours
+git clone <repo-url>
+cd afterhours
 
 # 2. Create a virtual environment
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
 
 # 4. Copy the environment template and fill in your keys
-cp .env.example .env
-# Edit .env with your API keys and Neo4j credentials
+Copy-Item .env.example .env
+# macOS/Linux: cp .env.example .env
+# Then edit .env with your API keys and Neo4j credentials
 
 # 5. Initialise the DuckDB schema
-python -c "
+python -c @"
 from afterhours.config.database import get_duckdb_connection
 from pathlib import Path
 conn = get_duckdb_connection()
 conn.execute(Path('schemas/duckdb/001_create_tables.sql').read_text())
 conn.close()
 print('DuckDB schema created.')
-"
+"@
 
 # 6. Initialise Neo4j constraints (requires a running Neo4j instance)
-cat schemas/neo4j/001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
+Get-Content schemas\neo4j\001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
+# macOS/Linux: cat schemas/neo4j/001_create_constraints.cypher | cypher-shell -u neo4j -p <password>
 
 # 7. Start the API server
 uvicorn afterhours.api.app:app --reload --app-dir src
@@ -192,21 +202,33 @@ Results land in the `linkage_table` with a `match_probability` (0.0--1.0) and a 
 
 ### Step 6 -- Human Review
 
-High-risk links must be reviewed before they appear in the graph. Use the API or call the functions directly:
+High-risk links must be reviewed before they appear in the graph. Use the API or call the functions directly.
 
-```bash
+**PowerShell:**
+
+```powershell
 # List pending reviews (highest risk first)
-curl http://localhost:8000/api/v1/compliance/pending
+Invoke-RestMethod http://localhost:8000/api/v1/compliance/pending
 
 # Approve a link
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/compliance/review/LINK_ID `
+  -ContentType "application/json" `
+  -Body '{"reviewer": "alice@example.com", "action": "approve"}'
+
+# Reject a link
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/compliance/review/LINK_ID `
+  -ContentType "application/json" `
+  -Body '{"reviewer": "alice@example.com", "action": "reject"}'
+```
+
+**curl (macOS/Linux):**
+
+```bash
+curl http://localhost:8000/api/v1/compliance/pending
+
 curl -X POST http://localhost:8000/api/v1/compliance/review/LINK_ID \
   -H "Content-Type: application/json" \
   -d '{"reviewer": "alice@example.com", "action": "approve"}'
-
-# Reject a link
-curl -X POST http://localhost:8000/api/v1/compliance/review/LINK_ID \
-  -H "Content-Type: application/json" \
-  -d '{"reviewer": "alice@example.com", "action": "reject"}'
 ```
 
 ### Step 7 -- Sync to the Graph
@@ -223,14 +245,24 @@ This creates/updates `Person`, `Company`, and `Constituency` nodes with `MP_FOR`
 
 ### Step 8 -- Query the Graph API
 
-```bash
+**PowerShell:**
+
+```powershell
 # Search for a person by name
-curl "http://localhost:8000/api/v1/graph/search?q=Smith&limit=10"
+Invoke-RestMethod "http://localhost:8000/api/v1/graph/search?q=Smith&limit=10"
 
 # Get a person's full graph (directorships, companies)
-curl http://localhost:8000/api/v1/graph/persons/parliament-4321
+Invoke-RestMethod http://localhost:8000/api/v1/graph/persons/parliament-4321
 
 # List high-risk persons above a given threshold
+Invoke-RestMethod "http://localhost:8000/api/v1/graph/high-risk?threshold=75&limit=20"
+```
+
+**curl (macOS/Linux):**
+
+```bash
+curl "http://localhost:8000/api/v1/graph/search?q=Smith&limit=10"
+curl http://localhost:8000/api/v1/graph/persons/parliament-4321
 curl "http://localhost:8000/api/v1/graph/high-risk?threshold=75&limit=20"
 ```
 
@@ -330,15 +362,25 @@ This platform implements safeguards required by the Data (Use and Access) Act 20
 
 ## Testing
 
-```bash
+**PowerShell:**
+
+```powershell
 # Run the full test suite
-PYTHONPATH=src pytest
+$env:PYTHONPATH = "src"
+pytest
 
 # With coverage
-PYTHONPATH=src pytest --cov=afterhours --cov-report=term-missing
+pytest --cov=afterhours --cov-report=term-missing
 
 # Run a specific module's tests
-PYTHONPATH=src pytest tests/test_intelligence/test_risk_scoring.py -v
+pytest tests\test_intelligence\test_risk_scoring.py -v
+```
+
+**macOS/Linux:**
+
+```bash
+PYTHONPATH=src pytest
+PYTHONPATH=src pytest --cov=afterhours --cov-report=term-missing
 ```
 
 ## Project Structure
